@@ -27,17 +27,81 @@ try:
 except Exception as e:
     print(f"Error initializing Google Drive: {e}")
 
-async def upload_text(content):
+async def get_or_create_date_folder(date_str):
+    """取得或建立按日期分類的資料夾"""
     if not drive_service:
-        return "Google Drive not configured."
+        return None
+    
+    try:
+        # 搜尋是否已存在該日期的資料夾
+        query = f"name='{date_str}' and mimeType='application/vnd.google-apps.folder' and '{GOOGLE_DRIVE_FOLDER_ID}' in parents and trashed=false"
+        results = drive_service.files().list(q=query, spaces='drive', fields='files(id, name)', pageSize=1).execute()
+        files = results.get('files', [])
+        
+        if files:
+            return files[0]['id']
+        
+        # 如果不存在，建立新資料夾
+        file_metadata = {
+            'name': date_str,
+            'mimeType': 'application/vnd.google-apps.folder',
+            'parents': [GOOGLE_DRIVE_FOLDER_ID]
+        }
+        folder = drive_service.files().create(body=file_metadata, fields='id').execute()
+        return folder.get('id')
+    except Exception as e:
+        print(f"Error getting/creating date folder: {e}")
+        return None
+
+async def get_or_create_message_folder(date_folder_id, message_id):
+    """取得或建立用於存放同一訊息的資料夾"""
+    if not drive_service:
+        return None
+    
+    try:
+        folder_name = f"message_{message_id}"
+        query = f"name='{folder_name}' and mimeType='application/vnd.google-apps.folder' and '{date_folder_id}' in parents and trashed=false"
+        results = drive_service.files().list(q=query, spaces='drive', fields='files(id, name)', pageSize=1).execute()
+        files = results.get('files', [])
+        
+        if files:
+            return files[0]['id']
+        
+        # 建立新資料夾
+        file_metadata = {
+            'name': folder_name,
+            'mimeType': 'application/vnd.google-apps.folder',
+            'parents': [date_folder_id]
+        }
+        folder = drive_service.files().create(body=file_metadata, fields='id').execute()
+        return folder.get('id')
+    except Exception as e:
+        print(f"Error getting/creating message folder: {e}")
+        return None
+
+async def upload_text(content, message_id):
+    """上傳文字到 Google Drive"""
+    if not drive_service:
+        return None
 
     try:
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        # 取得日期資料夾
+        date_str = datetime.now().strftime("%Y-%m-%d")
+        date_folder_id = await get_or_create_date_folder(date_str)
+        if not date_folder_id:
+            return None
+        
+        # 取得訊息資料夾
+        message_folder_id = await get_or_create_message_folder(date_folder_id, message_id)
+        if not message_folder_id:
+            return None
+        
+        timestamp = datetime.now().strftime("%H-%M-%S")
         file_name = f"text_{timestamp}.txt"
         
         file_metadata = {
             'name': file_name,
-            'parents': [GOOGLE_DRIVE_FOLDER_ID]
+            'parents': [message_folder_id]
         }
         
         media = MediaIoBaseUpload(io.BytesIO(content.encode('utf-8')), mimetype='text/plain', resumable=True)
@@ -51,24 +115,37 @@ async def upload_text(content):
         return file.get('webViewLink')
     except Exception as e:
         print(f"Error uploading text: {e}")
-        return f"Error: {str(e)}"
+        return None
 
-async def upload_photo(image_url, caption):
+async def upload_photo(image_url, message_id, caption=""):
+    """上傳圖片到 Google Drive"""
     if not drive_service:
-        return "Google Drive not configured."
+        return None
 
     try:
+        # 下載圖片
         async with httpx.AsyncClient() as client:
             response = await client.get(image_url)
             response.raise_for_status()
             image_data = response.content
 
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        # 取得日期資料夾
+        date_str = datetime.now().strftime("%Y-%m-%d")
+        date_folder_id = await get_or_create_date_folder(date_str)
+        if not date_folder_id:
+            return None
+        
+        # 取得訊息資料夾
+        message_folder_id = await get_or_create_message_folder(date_folder_id, message_id)
+        if not message_folder_id:
+            return None
+
+        timestamp = datetime.now().strftime("%H-%M-%S")
         file_name = f"photo_{timestamp}.jpg"
         
         file_metadata = {
             'name': file_name,
-            'parents': [GOOGLE_DRIVE_FOLDER_ID],
+            'parents': [message_folder_id],
             'description': caption
         }
         
@@ -83,4 +160,101 @@ async def upload_photo(image_url, caption):
         return file.get('webViewLink')
     except Exception as e:
         print(f"Error uploading photo: {e}")
-        return f"Error: {str(e)}"
+        return None
+
+async def upload_video(video_url, message_id, caption=""):
+    """上傳影片到 Google Drive"""
+    if not drive_service:
+        return None
+
+    try:
+        # 下載影片
+        async with httpx.AsyncClient() as client:
+            response = await client.get(video_url, timeout=60.0)
+            response.raise_for_status()
+            video_data = response.content
+        
+        # 檢查檔案大小（最大 50MB）
+        if len(video_data) > 50 * 1024 * 1024:
+            return "Error: Video file exceeds 50MB limit"
+
+        # 取得日期資料夾
+        date_str = datetime.now().strftime("%Y-%m-%d")
+        date_folder_id = await get_or_create_date_folder(date_str)
+        if not date_folder_id:
+            return None
+        
+        # 取得訊息資料夾
+        message_folder_id = await get_or_create_message_folder(date_folder_id, message_id)
+        if not message_folder_id:
+            return None
+
+        timestamp = datetime.now().strftime("%H-%M-%S")
+        file_name = f"video_{timestamp}.mp4"
+        
+        file_metadata = {
+            'name': file_name,
+            'parents': [message_folder_id],
+            'description': caption
+        }
+        
+        media = MediaIoBaseUpload(io.BytesIO(video_data), mimetype='video/mp4', resumable=True)
+        
+        file = drive_service.files().create(
+            body=file_metadata,
+            media_body=media,
+            fields='id, webViewLink'
+        ).execute()
+        
+        return file.get('webViewLink')
+    except Exception as e:
+        print(f"Error uploading video: {e}")
+        return None
+
+async def generate_daily_summary(date_str):
+    """生成每日彙總報告"""
+    if not drive_service:
+        return None
+    
+    try:
+        date_folder_id = await get_or_create_date_folder(date_str)
+        if not date_folder_id:
+            return None
+        
+        # 列出該日期資料夾中的所有訊息資料夾
+        query = f"mimeType='application/vnd.google-apps.folder' and '{date_folder_id}' in parents and trashed=false"
+        results = drive_service.files().list(q=query, spaces='drive', fields='files(id, name)', pageSize=100).execute()
+        message_folders = results.get('files', [])
+        
+        # 生成報告內容
+        report_content = f"""朋友圈內容彙總報告
+生成時間：{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+日期：{date_str}
+
+本日共備份 {len(message_folders)} 條訊息
+
+訊息列表：
+"""
+        for i, folder in enumerate(message_folders, 1):
+            report_content += f"{i}. {folder['name']}\n"
+        
+        report_content += "\n所有檔案已儲存到 Google Drive，請查看相應的連結。\n"
+        
+        # 上傳報告
+        file_metadata = {
+            'name': f"daily_summary_{date_str}.txt",
+            'parents': [date_folder_id]
+        }
+        
+        media = MediaIoBaseUpload(io.BytesIO(report_content.encode('utf-8')), mimetype='text/plain', resumable=True)
+        
+        file = drive_service.files().create(
+            body=file_metadata,
+            media_body=media,
+            fields='id, webViewLink'
+        ).execute()
+        
+        return file.get('webViewLink')
+    except Exception as e:
+        print(f"Error generating daily summary: {e}")
+        return None
