@@ -13,8 +13,12 @@ from gdrive import upload_text, upload_photo, upload_video
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
-# 用於存儲待保存的訊息
+# 預設資料夾名稱
+DEFAULT_FOLDER_NAMES = ["朋友圈", "生活分享", "每日記錄", "備份"]
+
+# 用於存儲待保存的訊息和自定義資料夾名稱
 pending_messages = {}
+user_folder_names = {}
 
 async def handle_message(update):
     if "message" not in update:
@@ -24,21 +28,66 @@ async def handle_message(update):
     chat_id = message["chat"]["id"]
     message_id = message["message_id"]
     
-    # 檢查是否為 /start 指令
+    # 檢查是否為文字指令
     if "text" in message:
         text = message["text"]
+        
         if text == "/start":
-            await send_message(chat_id, "你好！請轉發朋友圈的內容給我，然後輸入 /save 指令來備份。\n\n支援的媒體類型：\n- 文字\n- 圖片\n- 影片 (MP4, MOV, 最大 50MB)")
+            await send_start_message(chat_id)
             return
+        
+        elif text == "/setfolder":
+            await send_folder_selection_message(chat_id)
+            return
+        
         elif text == "/save":
             # 保存待處理的訊息
             if chat_id in pending_messages and pending_messages[chat_id]:
-                await save_pending_messages(chat_id)
+                folder_name = user_folder_names.get(chat_id, DEFAULT_FOLDER_NAMES[0])
+                await save_pending_messages(chat_id, folder_name)
             else:
                 await send_message(chat_id, "沒有待保存的訊息。請先轉發朋友圈內容。")
             return
+        
+        # 檢查是否為預設資料夾名稱選擇
+        if text in DEFAULT_FOLDER_NAMES:
+            user_folder_names[chat_id] = text
+            await send_message(chat_id, f"✓ 已選擇資料夾：{text}\n\n現在請轉發朋友圈內容，完成後輸入 /save 保存。")
+            return
+        
+        # 檢查是否為自定義資料夾名稱
+        if text.startswith("📁 "):
+            # 用戶輸入的自定義名稱
+            custom_name = text[3:].strip()
+            if custom_name:
+                user_folder_names[chat_id] = custom_name
+                await send_message(chat_id, f"✓ 已設定資料夾名稱：{custom_name}\n\n現在請轉發朋友圈內容，完成後輸入 /save 保存。")
+                return
+        
+        # 如果不是指令，檢查是否為自定義資料夾名稱輸入
+        # 用戶可以直接輸入任何文字作為資料夾名稱
+        if not text.startswith("/"):
+            # 檢查是否在等待自定義資料夾名稱
+            if chat_id not in user_folder_names or user_folder_names[chat_id] is None:
+                # 假設用戶想要設定自定義資料夾名稱
+                user_folder_names[chat_id] = text
+                await send_message(chat_id, f"✓ 已設定資料夾名稱：{text}\n\n現在請轉發朋友圈內容，完成後輸入 /save 保存。")
+                return
+            
+            # 否則作為普通文字訊息處理
+            if chat_id not in pending_messages:
+                pending_messages[chat_id] = {
+                    'texts': [],
+                    'photos': [],
+                    'videos': [],
+                    'message_id': message_id
+                }
+            
+            pending_messages[chat_id]['texts'].append(text)
+            await send_message(chat_id, f"✓ 已記錄文字訊息")
+            return
 
-    # 儲存訊息到 pending_messages
+    # 初始化待保存訊息
     if chat_id not in pending_messages:
         pending_messages[chat_id] = {
             'texts': [],
@@ -47,12 +96,10 @@ async def handle_message(update):
             'message_id': message_id
         }
     
-    # 處理文字
-    if "text" in message:
-        text = message["text"]
-        if not text.startswith("/"):  # 忽略指令
-            pending_messages[chat_id]['texts'].append(text)
-            await send_message(chat_id, f"✓ 已記錄文字訊息")
+    # 如果用戶還沒選擇資料夾名稱，提示選擇
+    if chat_id not in user_folder_names or user_folder_names[chat_id] is None:
+        await send_folder_selection_message(chat_id)
+        return
 
     # 處理圖片
     if "photo" in message:
@@ -87,7 +134,41 @@ async def handle_message(update):
             })
             await send_message(chat_id, f"✓ 已記錄影片 ({len(pending_messages[chat_id]['videos'])} 個)")
 
-async def save_pending_messages(chat_id):
+async def send_start_message(chat_id):
+    """發送開始訊息"""
+    message_text = """👋 歡迎使用朋友圈備份機器人！
+
+📋 使用步驟：
+1️⃣ 輸入 /setfolder 選擇或自定義資料夾名稱
+2️⃣ 轉發朋友圈的文字、圖片或影片
+3️⃣ 完成後輸入 /save 保存到 Google Drive
+
+💡 提示：
+- 支援的媒體類型：文字、圖片、影片 (MP4, MOV, 最大 50MB)
+- 同一篇貼文的所有內容會放在同一個資料夾中
+- 資料夾會按日期自動分類
+
+🔧 指令：
+/start - 顯示此訊息
+/setfolder - 選擇或自定義資料夾名稱
+/save - 保存待處理的訊息"""
+    
+    await send_message(chat_id, message_text)
+
+async def send_folder_selection_message(chat_id):
+    """發送資料夾選擇訊息"""
+    message_text = """📁 請選擇資料夾名稱：
+
+預設選項：
+"""
+    for i, name in enumerate(DEFAULT_FOLDER_NAMES, 1):
+        message_text += f"{i}. {name}\n"
+    
+    message_text += f"\n或者直接輸入自定義資料夾名稱（例如：我的朋友圈、工作備份等）"
+    
+    await send_message(chat_id, message_text)
+
+async def save_pending_messages(chat_id, folder_name):
     """保存待處理的訊息到 Google Drive"""
     if chat_id not in pending_messages or not pending_messages[chat_id]:
         await send_message(chat_id, "沒有待保存的訊息。")
@@ -104,7 +185,7 @@ async def save_pending_messages(chat_id):
     # 保存文字
     for text in pending['texts']:
         try:
-            result = await upload_text(text, message_id)
+            result = await upload_text(text, message_id, folder_name)
             if result:
                 saved_count += 1
         except Exception as e:
@@ -114,7 +195,7 @@ async def save_pending_messages(chat_id):
     for photo in pending['photos']:
         try:
             image_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{photo['file_path']}"
-            result = await upload_photo(image_url, message_id, photo.get('caption', ''))
+            result = await upload_photo(image_url, message_id, folder_name, photo.get('caption', ''))
             if result:
                 saved_count += 1
         except Exception as e:
@@ -124,7 +205,7 @@ async def save_pending_messages(chat_id):
     for video in pending['videos']:
         try:
             video_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{video['file_path']}"
-            result = await upload_video(video_url, message_id, video.get('caption', ''))
+            result = await upload_video(video_url, message_id, folder_name, video.get('caption', ''))
             if result:
                 saved_count += 1
         except Exception as e:
@@ -133,7 +214,8 @@ async def save_pending_messages(chat_id):
     # 發送結果訊息
     response = f"✅ 已保存 {saved_count} 個檔案\n"
     response += f"📅 日期：{datetime.now().strftime('%Y-%m-%d')}\n"
-    response += f"📁 訊息已按日期和訊息 ID 分類\n"
+    response += f"📁 資料夾：{folder_name}\n"
+    response += f"📍 訊息已按日期和訊息 ID 分類\n"
     
     if errors:
         response += "\n⚠️ 發生以下錯誤：\n"

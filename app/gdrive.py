@@ -27,14 +27,40 @@ try:
 except Exception as e:
     print(f"Error initializing Google Drive: {e}")
 
-async def get_or_create_date_folder(date_str):
-    """取得或建立按日期分類的資料夾"""
+async def get_or_create_custom_folder(folder_name):
+    """取得或建立自定義名稱的資料夾"""
+    if not drive_service:
+        return None
+    
+    try:
+        # 搜尋是否已存在該名稱的資料夾
+        query = f"name='{folder_name}' and mimeType='application/vnd.google-apps.folder' and '{GOOGLE_DRIVE_FOLDER_ID}' in parents and trashed=false"
+        results = drive_service.files().list(q=query, spaces='drive', fields='files(id, name)', pageSize=1).execute()
+        files = results.get('files', [])
+        
+        if files:
+            return files[0]['id']
+        
+        # 如果不存在，建立新資料夾
+        file_metadata = {
+            'name': folder_name,
+            'mimeType': 'application/vnd.google-apps.folder',
+            'parents': [GOOGLE_DRIVE_FOLDER_ID]
+        }
+        folder = drive_service.files().create(body=file_metadata, fields='id').execute()
+        return folder.get('id')
+    except Exception as e:
+        print(f"Error getting/creating custom folder: {e}")
+        return None
+
+async def get_or_create_date_folder(custom_folder_id, date_str):
+    """在自定義資料夾下建立日期資料夾"""
     if not drive_service:
         return None
     
     try:
         # 搜尋是否已存在該日期的資料夾
-        query = f"name='{date_str}' and mimeType='application/vnd.google-apps.folder' and '{GOOGLE_DRIVE_FOLDER_ID}' in parents and trashed=false"
+        query = f"name='{date_str}' and mimeType='application/vnd.google-apps.folder' and '{custom_folder_id}' in parents and trashed=false"
         results = drive_service.files().list(q=query, spaces='drive', fields='files(id, name)', pageSize=1).execute()
         files = results.get('files', [])
         
@@ -45,7 +71,7 @@ async def get_or_create_date_folder(date_str):
         file_metadata = {
             'name': date_str,
             'mimeType': 'application/vnd.google-apps.folder',
-            'parents': [GOOGLE_DRIVE_FOLDER_ID]
+            'parents': [custom_folder_id]
         }
         folder = drive_service.files().create(body=file_metadata, fields='id').execute()
         return folder.get('id')
@@ -79,15 +105,20 @@ async def get_or_create_message_folder(date_folder_id, message_id):
         print(f"Error getting/creating message folder: {e}")
         return None
 
-async def upload_text(content, message_id):
+async def upload_text(content, message_id, custom_folder_name):
     """上傳文字到 Google Drive"""
     if not drive_service:
         return None
 
     try:
+        # 取得自定義資料夾
+        custom_folder_id = await get_or_create_custom_folder(custom_folder_name)
+        if not custom_folder_id:
+            return None
+        
         # 取得日期資料夾
         date_str = datetime.now().strftime("%Y-%m-%d")
-        date_folder_id = await get_or_create_date_folder(date_str)
+        date_folder_id = await get_or_create_date_folder(custom_folder_id, date_str)
         if not date_folder_id:
             return None
         
@@ -117,7 +148,7 @@ async def upload_text(content, message_id):
         print(f"Error uploading text: {e}")
         return None
 
-async def upload_photo(image_url, message_id, caption=""):
+async def upload_photo(image_url, message_id, custom_folder_name, caption=""):
     """上傳圖片到 Google Drive"""
     if not drive_service:
         return None
@@ -129,9 +160,14 @@ async def upload_photo(image_url, message_id, caption=""):
             response.raise_for_status()
             image_data = response.content
 
+        # 取得自定義資料夾
+        custom_folder_id = await get_or_create_custom_folder(custom_folder_name)
+        if not custom_folder_id:
+            return None
+        
         # 取得日期資料夾
         date_str = datetime.now().strftime("%Y-%m-%d")
-        date_folder_id = await get_or_create_date_folder(date_str)
+        date_folder_id = await get_or_create_date_folder(custom_folder_id, date_str)
         if not date_folder_id:
             return None
         
@@ -162,7 +198,7 @@ async def upload_photo(image_url, message_id, caption=""):
         print(f"Error uploading photo: {e}")
         return None
 
-async def upload_video(video_url, message_id, caption=""):
+async def upload_video(video_url, message_id, custom_folder_name, caption=""):
     """上傳影片到 Google Drive"""
     if not drive_service:
         return None
@@ -178,9 +214,14 @@ async def upload_video(video_url, message_id, caption=""):
         if len(video_data) > 50 * 1024 * 1024:
             return "Error: Video file exceeds 50MB limit"
 
+        # 取得自定義資料夾
+        custom_folder_id = await get_or_create_custom_folder(custom_folder_name)
+        if not custom_folder_id:
+            return None
+        
         # 取得日期資料夾
         date_str = datetime.now().strftime("%Y-%m-%d")
-        date_folder_id = await get_or_create_date_folder(date_str)
+        date_folder_id = await get_or_create_date_folder(custom_folder_id, date_str)
         if not date_folder_id:
             return None
         
@@ -211,13 +252,17 @@ async def upload_video(video_url, message_id, caption=""):
         print(f"Error uploading video: {e}")
         return None
 
-async def generate_daily_summary(date_str):
+async def generate_daily_summary(custom_folder_name, date_str):
     """生成每日彙總報告"""
     if not drive_service:
         return None
     
     try:
-        date_folder_id = await get_or_create_date_folder(date_str)
+        custom_folder_id = await get_or_create_custom_folder(custom_folder_name)
+        if not custom_folder_id:
+            return None
+        
+        date_folder_id = await get_or_create_date_folder(custom_folder_id, date_str)
         if not date_folder_id:
             return None
         
@@ -230,6 +275,7 @@ async def generate_daily_summary(date_str):
         report_content = f"""朋友圈內容彙總報告
 生成時間：{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
 日期：{date_str}
+分類：{custom_folder_name}
 
 本日共備份 {len(message_folders)} 條訊息
 
