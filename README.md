@@ -1,11 +1,13 @@
-# Telegram 朋友圈備份機器人 (v3.0)
+# Telegram 朋友圈備份機器人 (v4.0)
 
 ## 專案概覽
 
-本專案提供一個 Telegram 機器人，可以接收使用者轉發的文字、圖片和影片訊息。當使用者輸入 `/save` 指令時，機器人會將之前轉發的所有內容自動儲存到指定的 Google Drive 資料夾中，並實現自動分類和自定義資料夾名稱。
+本專案提供一個 Telegram 機器人，可以接收使用者轉發的文字、圖片和影片訊息。當使用者輸入 `/save` 指令時，機器人會將之前轉發的所有內容自動儲存到指定的 Google Drive 資料夾中，並實現自動分類、自定義資料夾名稱和 Google Docs 文字儲存。
 
-## 新功能 (v3.0)
+## 新功能 (v4.0)
 
+- **Google Docs 文字儲存**: 文字訊息會保存為 Google Docs 檔案，而不是 .txt。
+- **媒體連結嵌入**: 在 Google Docs 檔案中自動嵌入相關的圖片和影片連結。
 - **自定義資料夾名稱**: 使用 `/setfolder` 指令選擇預設資料夾名稱，或直接輸入自定義名稱。
 - **指令觸發備份**: 使用 `/save` 指令來觸發備份，方便一次性處理多個媒體檔案。
 - **自動資料夾分類**: 檔案會自動儲存在 `/{根目錄}/{自定義名稱}/{年-月-日}/message_{訊息ID}/` 的結構中。
@@ -26,7 +28,7 @@
 部署前，請確保您已完成以下準備工作 (與舊版相同)：
 
 1.  **取得 Telegram Bot Token** (透過 `@BotFather`)。
-2.  **取得 Google Service Account 金鑰** (在 Google Cloud Console 中建立並啟用 Drive API)。
+2.  **取得 Google Service Account 金鑰** (在 Google Cloud Console 中建立並啟用 Drive API 和 Docs API)。
 3.  **取得 Google Drive 根資料夾 ID**。
 4.  **分享資料夾權限**給您的 Service Account 電子郵件。
 

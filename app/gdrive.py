@@ -304,3 +304,106 @@ async def generate_daily_summary(custom_folder_name, date_str):
     except Exception as e:
         print(f"Error generating daily summary: {e}")
         return None
+
+# Google Docs API 支援
+docs_service = None
+
+try:
+    if GOOGLE_SERVICE_ACCOUNT_JSON:
+        docs_service = build('docs', 'v1', credentials=creds)
+except Exception as e:
+    print(f"Error initializing Google Docs: {e}")
+
+async def create_google_doc(text_content, message_id, custom_folder_name, media_links=None):
+    """建立 Google Docs 文件來儲存文字訊息"""
+    if not drive_service or not docs_service:
+        return None
+    
+    try:
+        # 取得自定義資料夾
+        custom_folder_id = await get_or_create_custom_folder(custom_folder_name)
+        if not custom_folder_id:
+            return None
+        
+        # 取得日期資料夾
+        date_str = datetime.now().strftime("%Y-%m-%d")
+        date_folder_id = await get_or_create_date_folder(custom_folder_id, date_str)
+        if not date_folder_id:
+            return None
+        
+        # 取得訊息資料夾
+        message_folder_id = await get_or_create_message_folder(date_folder_id, message_id)
+        if not message_folder_id:
+            return None
+        
+        # 建立 Google Docs 檔案
+        timestamp = datetime.now().strftime("%H-%M-%S")
+        doc_title = f"text_{timestamp}"
+        
+        doc_body = {
+            'title': doc_title,
+            'parents': [message_folder_id]
+        }
+        
+        # 在 Google Drive 中建立文件
+        doc = drive_service.files().create(
+            body=doc_body,
+            mimeType='application/vnd.google-apps.document',
+            fields='id, webViewLink'
+        ).execute()
+        
+        doc_id = doc.get('id')
+        doc_link = doc.get('webViewLink')
+        
+        # 準備文件內容
+        requests = []
+        
+        # 添加文字內容
+        requests.append({
+            'insertText': {
+                'text': text_content,
+                'location': {'index': 1}
+            }
+        })
+        
+        # 添加媒體連結（如果有）
+        if media_links:
+            requests.append({
+                'insertText': {
+                    'text': '\n\n相關媒體：\n',
+                    'location': {'index': len(text_content) + 1}
+                }
+            })
+            
+            current_index = len(text_content) + 14
+            for link_type, link_url in media_links:
+                link_text = f"• {link_type}: {link_url}\n"
+                requests.append({
+                    'insertText': {
+                        'text': link_text,
+                        'location': {'index': current_index}
+                    }
+                })
+                current_index += len(link_text)
+        
+        # 添加時間戳記
+        timestamp_text = f"\n\n建立時間：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        requests.append({
+            'insertText': {
+                'text': timestamp_text,
+                'location': {'index': 1}
+            }
+        })
+        
+        # 應用所有更改
+        if requests:
+            docs_service.documents().batchUpdate(
+                documentId=doc_id,
+                body={'requests': requests}
+            ).execute()
+        
+        return doc_link
+    
+    except Exception as e:
+        print(f"Error creating Google Doc: {e}")
+        return None

@@ -8,7 +8,7 @@ from datetime import datetime
 # 添加當前目錄到 Python 路徑
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from gdrive import upload_text, upload_photo, upload_video
+from gdrive import upload_text, upload_photo, upload_video, create_google_doc
 
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
@@ -145,8 +145,10 @@ async def send_start_message(chat_id):
 
 💡 提示：
 - 支援的媒體類型：文字、圖片、影片 (MP4, MOV, 最大 50MB)
+- 文字訊息會保存為 Google Docs
+- 每條文字訊息建立獨立的 Doc 檔案
+- Doc 檔案中會嵌入相關的圖片和影片連結
 - 同一篇貼文的所有內容會放在同一個資料夾中
-- 資料夾會按日期自動分類
 
 🔧 指令：
 /start - 顯示此訊息
@@ -182,10 +184,21 @@ async def save_pending_messages(chat_id, folder_name):
     saved_count = 0
     errors = []
     
-    # 保存文字
+    # 保存文字（使用 Google Docs）
     for text in pending['texts']:
         try:
-            result = await upload_text(text, message_id, folder_name)
+            # 準備媒體連結
+            media_links = []
+            
+            # 添加圖片連結
+            for i, photo in enumerate(pending['photos'], 1):
+                media_links.append(('圖片', photo.get('file_path', 'N/A')))
+            
+            # 添加影片連結
+            for i, video in enumerate(pending['videos'], 1):
+                media_links.append(('影片', video.get('file_path', 'N/A')))
+            
+            result = await create_google_doc(text, message_id, folder_name, media_links if media_links else None)
             if result:
                 saved_count += 1
         except Exception as e:
